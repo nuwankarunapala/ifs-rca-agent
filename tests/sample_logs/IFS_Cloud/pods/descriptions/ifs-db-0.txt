@@ -1,0 +1,28 @@
+Name:           ifs-db-0
+Namespace:      ifs-production
+Node:           worker-node-02/10.0.0.2
+Start Time:     Thu, 20 Mar 2026 13:50:00 +0000
+Labels:         app=ifs-db, statefulset.kubernetes.io/pod-name=ifs-db-0
+Status:         Running
+
+Containers:
+  ifs-db:
+    Image:      registry.internal/ifs/postgres:14.5
+    Port:       5432/TCP
+    Limits:
+      memory:   2Gi
+      cpu:      2
+    Last State: Terminated
+      Reason:   OOMKilled
+      Exit Code: 137
+      Started:  Thu, 20 Mar 2026 14:01:46 +0000
+      Finished: Thu, 20 Mar 2026 14:01:50 +0000
+    Ready:      False
+    Restart Count: 2
+
+Events:
+  Type     Reason     Age   From             Message
+  ----     ------     ----  ----             -------
+  Warning  OOMKilling 8m    kernel-monitor   Out of memory: Kill process 567 (postgres) score 950 or sacrifice child
+  Normal   Pulled     9m    kubelet          Successfully pulled image
+  Warning  BackOff    5m    kubelet          Back-off restarting failed container ifs-db

@@ -1,0 +1,15 @@
+2026-03-20T14:00:01Z INFO  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Starting container ifs-app v3.2.1
+2026-03-20T14:00:15Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Liveness probe failed: HTTP probe failed with statuscode: 500
+2026-03-20T14:00:45Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Liveness probe failed: HTTP probe failed with statuscode: 500
+2026-03-20T14:01:00Z WARN  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Back-off restarting failed container ifs-app (restart count: 1)
+2026-03-20T14:01:30Z INFO  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Restarting container ifs-app after crash (restart count: 2)
+2026-03-20T14:02:00Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Exception in thread "main" java.lang.OutOfMemoryError: GC overhead limit exceeded
+2026-03-20T14:02:10Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Liveness probe failed: Get "http://10.0.1.5:8080/health": dial tcp 10.0.1.5:8080: connect: connection refused
+2026-03-20T14:02:30Z WARN  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Back-off restarting failed container ifs-app (restart count: 3)
+2026-03-20T14:03:00Z INFO  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Restarting container ifs-app after crash (restart count: 4)
+2026-03-20T14:03:22Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p CrashLoopBackOff: back-off 5m0s restarting failed container=ifs-app pod=ifs-app-7d9f4b-xk2p_ifs-production
+2026-03-20T14:03:45Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Liveness probe failed: HTTP probe failed with statuscode: 503
+2026-03-20T14:04:00Z WARN  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Back-off restarting failed container ifs-app (restart count: 5)
+2026-03-20T14:04:30Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p CrashLoopBackOff: back-off 10m0s restarting failed container=ifs-app pod=ifs-app-7d9f4b-xk2p_ifs-production
+2026-03-20T14:05:00Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Exception: Unhandled exception during startup: cannot connect to database at ifs-db-svc:5432
+2026-03-20T14:05:15Z WARN  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Back-off restarting failed container ifs-app (restart count: 6)

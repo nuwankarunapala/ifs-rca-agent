@@ -1,0 +1,17 @@
+2026-03-20T13:50:00Z INFO  kube-system node/worker-node-03 Node registered successfully
+2026-03-20T13:52:00Z WARN  kube-system node/worker-node-03 Node condition DiskPressure=True: low disk space (only 2Gi remaining)
+2026-03-20T13:54:00Z ERROR kube-system node/worker-node-03 NodeNotReady: node condition=Ready status=False reason=KubeletNotReady
+2026-03-20T13:54:30Z WARN  namespace/ifs-production pod/ifs-cache-5x7p2r Node not ready, eviction threshold reached
+2026-03-20T13:55:00Z ERROR namespace/ifs-production pod/ifs-cache-5x7p2r Evicted: pod eviction due to node pressure on worker-node-03 (DiskPressure)
+2026-03-20T13:55:10Z ERROR namespace/ifs-production pod/ifs-metrics-6n8p1z Evicted: pod eviction due to node pressure on worker-node-03 (MemoryPressure)
+2026-03-20T13:56:00Z INFO  namespace/ifs-production pod/ifs-cache-5x7p2r Rescheduled onto worker-node-01
+2026-03-20T13:57:00Z ERROR namespace/ifs-production pod/ifs-importer-2b9r4s Failed to pull image "registry.internal/ifs/importer:v2.0.0-rc1": ImagePullBackOff
+2026-03-20T13:57:30Z ERROR namespace/ifs-production pod/ifs-importer-2b9r4s ErrImagePull: rpc error: code = Unknown desc = failed to pull and unpack image: not found
+2026-03-20T13:58:00Z WARN  namespace/ifs-production pod/ifs-importer-2b9r4s Back-off pulling image "registry.internal/ifs/importer:v2.0.0-rc1"
+2026-03-20T13:59:00Z ERROR kube-system node/worker-node-03 NodeNotReady: kubelet stopped posting node status (last heartbeat 5m ago)
+2026-03-20T14:00:00Z WARN  namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Readiness probe failed: HTTP probe failed with statuscode: 503
+2026-03-20T14:00:30Z WARN  namespace/ifs-production pod/ifs-app-7d9f4b-ab3q Readiness probe failed: connection refused on port 8080
+2026-03-20T14:01:00Z ERROR kube-system node/worker-node-03 NodeNotReady: node is not schedulable — tainted NoSchedule
+2026-03-20T14:02:00Z ERROR namespace/ifs-production pod/ifs-metrics-6n8p1z Evicted: The node was low on resource: memory. Threshold: 100Mi, available: 50Mi
+2026-03-20T14:03:00Z INFO  kube-system scheduler Rescheduling 3 pods from worker-node-03 to worker-node-01, worker-node-02
+2026-03-20T14:05:00Z WARN  namespace/ifs-production pod/ifs-importer-2b9r4s Back-off pulling image "registry.internal/ifs/importer:v2.0.0-rc1" (retry 5)

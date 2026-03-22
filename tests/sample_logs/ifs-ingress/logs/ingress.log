@@ -1,0 +1,7 @@
+2026-03-20T14:00:00Z INFO  ingress 200 GET /api/health 12ms upstream=ifs-app-svc
+2026-03-20T14:01:30Z WARN  ingress upstream ifs-app-svc timed out after 30s — 503 Service Unavailable
+2026-03-20T14:01:45Z ERROR ingress 502 Bad Gateway: upstream ifs-app-svc returned no healthy endpoints
+2026-03-20T14:02:00Z ERROR ingress 503 Service Unavailable: upstream ifs-app-svc 0/3 endpoints healthy
+2026-03-20T14:02:15Z ERROR ingress 503 Service Unavailable: upstream ifs-db-svc 0/1 endpoints healthy
+2026-03-20T14:03:00Z WARN  ingress upstream ifs-app-svc timed out after 30s — circuit breaker tripped
+2026-03-20T14:04:00Z ERROR ingress 502 Bad Gateway: all upstream retries exhausted for ifs-app-svc

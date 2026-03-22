@@ -1,0 +1,6 @@
+2026-03-20T13:58:00Z INFO  autoscaler HPA ifs-app: current replicas=2 desired=2 (CPU 45%)
+2026-03-20T14:00:00Z INFO  autoscaler HPA ifs-app: current replicas=2 desired=3 (CPU 82% — scaling up)
+2026-03-20T14:01:00Z ERROR autoscaler HPA ifs-app: failed to scale deployment ifs-app to 3: not enough resources on available nodes
+2026-03-20T14:02:00Z WARN  autoscaler HPA ifs-app: autoscaler failed — scale-up blocked due to NodeNotReady on worker-node-03
+2026-03-20T14:03:00Z ERROR autoscaler HPA ifs-app: unable to scale — all scale-up attempts timed out
+2026-03-20T14:04:00Z WARN  autoscaler cluster-autoscaler: no unschedulable pods detected, skipping node provisioning

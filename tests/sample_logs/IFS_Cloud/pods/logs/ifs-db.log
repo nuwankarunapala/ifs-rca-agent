@@ -1,0 +1,6 @@
+2026-03-20T13:58:00Z INFO  namespace/ifs-production pod/ifs-db-0 Database ready to accept connections
+2026-03-20T14:01:45Z ERROR namespace/ifs-production pod/ifs-db-0 OOMKilled: container ifs-db was killed due to memory limit exceeded (2Gi)
+2026-03-20T14:01:50Z INFO  namespace/ifs-production pod/ifs-db-0 Restarting container ifs-db after OOMKill (restart count: 1)
+2026-03-20T14:02:00Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Connection refused: dial tcp 10.0.2.10:5432: connect: connection refused
+2026-03-20T14:03:30Z ERROR namespace/ifs-production pod/ifs-db-0 OOMKilled: container ifs-db was killed again due to memory limit exceeded (2Gi)
+2026-03-20T14:04:00Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Exception: pq: connection reset by peer — database unavailable

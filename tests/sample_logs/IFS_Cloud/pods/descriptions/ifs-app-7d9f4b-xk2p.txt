@@ -1,0 +1,33 @@
+Name:           ifs-app-7d9f4b-xk2p
+Namespace:      ifs-production
+Node:           worker-node-01/10.0.0.1
+Start Time:     Thu, 20 Mar 2026 13:55:00 +0000
+Labels:         app=ifs-app
+Status:         Running
+
+Containers:
+  ifs-app:
+    Image:      registry.internal/ifs/app:v3.2.1
+    Port:       8080/TCP
+    Last State: Terminated
+      Reason:   OOMKilled
+      Exit Code: 137
+      Started:  Thu, 20 Mar 2026 14:01:30 +0000
+      Finished: Thu, 20 Mar 2026 14:01:45 +0000
+    Ready:      False
+    Restart Count: 5
+
+Conditions:
+  Type              Status
+  Initialized       True
+  Ready             False
+  ContainersReady   False
+
+Events:
+  Type     Reason            Age    From               Message
+  ----     ------            ----   ----               -------
+  Normal   Scheduled         10m    default-scheduler  Successfully assigned ifs-production/ifs-app-7d9f4b-xk2p to worker-node-01
+  Warning  BackOff           5m     kubelet            Back-off restarting failed container ifs-app
+  Warning  OOMKilling        8m     kernel-monitor     Out of memory: Kill process 1234 (java) score 900
+  Warning  Liveness probe    6m     kubelet            Liveness probe failed: HTTP probe failed with statuscode: 500
+  Warning  CrashLoopBackOff  3m     kubelet            Back-off 5m0s restarting failed container=ifs-app

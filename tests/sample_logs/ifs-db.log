@@ -1,0 +1,17 @@
+2026-03-20T13:55:00Z INFO  namespace/ifs-production pod/ifs-db-0 PostgreSQL 14.5 starting up
+2026-03-20T13:58:00Z INFO  namespace/ifs-production pod/ifs-db-0 Database ready to accept connections
+2026-03-20T14:00:30Z WARN  namespace/ifs-production pod/ifs-db-0 Memory usage at 1.8Gi of 2Gi limit (90%)
+2026-03-20T14:01:00Z WARN  namespace/ifs-production pod/ifs-db-0 Memory usage at 1.95Gi of 2Gi limit (97%)
+2026-03-20T14:01:45Z ERROR namespace/ifs-production pod/ifs-db-0 OOMKilled: container ifs-db was killed due to memory limit exceeded (2Gi)
+2026-03-20T14:01:46Z ERROR namespace/ifs-production pod/ifs-db-0 Out of memory: Kill process 1234 (postgres) score 950 or sacrifice child
+2026-03-20T14:01:50Z INFO  namespace/ifs-production pod/ifs-db-0 Restarting container ifs-db after OOMKill (restart count: 1)
+2026-03-20T14:02:00Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Connection refused: dial tcp 10.0.2.10:5432: connect: connection refused
+2026-03-20T14:02:05Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-ab3q Connection refused: dial tcp 10.0.2.10:5432: connect: connection refused
+2026-03-20T14:02:10Z ERROR namespace/ifs-production pod/ifs-worker-9k2l3m Connection refused: dial tcp 10.0.2.10:5432: connect: connection refused
+2026-03-20T14:02:30Z INFO  namespace/ifs-production pod/ifs-db-0 PostgreSQL restarting after OOMKill, replaying WAL
+2026-03-20T14:03:00Z WARN  namespace/ifs-production pod/ifs-db-0 Memory usage at 1.7Gi of 2Gi limit (85%) — high load detected
+2026-03-20T14:03:30Z ERROR namespace/ifs-production pod/ifs-db-0 OOMKilled: container ifs-db was killed again due to memory limit exceeded (2Gi)
+2026-03-20T14:03:35Z INFO  namespace/ifs-production pod/ifs-db-0 Restarting container ifs-db after OOMKill (restart count: 2)
+2026-03-20T14:04:00Z ERROR namespace/ifs-production pod/ifs-app-7d9f4b-xk2p Exception: pq: connection reset by peer — database unavailable
+2026-03-20T14:04:15Z ERROR namespace/ifs-production pod/ifs-worker-9k2l3m Connection refused: FATAL: the database system is starting up
+2026-03-20T14:05:00Z WARN  namespace/ifs-production pod/ifs-db-0 Memory usage at 1.92Gi of 2Gi limit (96%)
