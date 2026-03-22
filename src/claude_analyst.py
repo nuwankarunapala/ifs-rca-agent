@@ -79,6 +79,35 @@ Be precise and evidence-based. Reference specific pod names, timestamps, and err
 messages from the supplied data. Do not invent facts not present in the evidence."""
 
 
+_MOCK_RESPONSE = """\
+PRIMARY ROOT CAUSE:
+The IFS application experienced a cascading failure initiated by
+an OOMKilled event on the database pod ifs-db-primary-0. The pod
+exceeded its 2Gi memory limit causing it to be killed by the
+Kubernetes OOM controller.
+
+CHAIN OF EVENTS:
+1. 14:01:45 - ifs-db-primary-0 exceeded memory limit and was OOMKilled
+2. 14:02:10 - Application pods lost database connectivity
+3. 14:03:22 - ifs-app-7d9f4b-xk2p entered CrashLoopBackOff due to
+              failed database connections
+4. 14:05:00 - Liveness probes began failing across all app pods
+5. 14:07:30 - Full service unavailability reached
+
+BLAST RADIUS:
+- IFS Core application completely unavailable
+- All user sessions terminated
+- Payment module affected due to shared database dependency
+
+RECOMMENDATIONS:
+1. Increase database pod memory limit from 2Gi to 4Gi
+2. Add memory usage alerting at 80% threshold
+3. Implement database connection retry logic in application
+4. Add Pod Disruption Budget to prevent simultaneous pod failures
+5. Schedule regular memory profiling of database workloads
+"""
+
+
 def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) -> str:
     """
     Send errors and context to Claude Opus 4.6 and return the structured RCA text.
@@ -90,6 +119,12 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
     Returns:
         Claude's RCA as a Markdown string with the 9-section structure.
     """
+    if os.getenv("MOCK_MODE", "false").strip().lower() == "true":
+        console.print(
+            "\n[bold yellow][MOCK MODE] Skipping real API call - using mock response[/bold yellow]"
+        )
+        return _MOCK_RESPONSE
+
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise EnvironmentError(

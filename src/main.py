@@ -10,14 +10,14 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
-from src import log_reader, log_parser, user_interaction, claude_analyst, rca_generator
+from src import log_reader, log_parser, claude_analyst, rca_generator
 
 _DEFAULT_LOGS_DIR = "logs"
 
 console = Console()
 
 
-def main(logs_dir: str = _DEFAULT_LOGS_DIR) -> None:
+def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     # ------------------------------------------------------------------
     # Welcome banner
     # ------------------------------------------------------------------
@@ -59,10 +59,17 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR) -> None:
     console.print(f"[green]Detected {len(errors)} error event(s).[/green]")
 
     # ------------------------------------------------------------------
-    # Step 3 — Gather user context
+    # Step 3 — Build user context from CLI argument
     # ------------------------------------------------------------------
-    console.print("\n[bold]Step 3: Gathering incident context...[/bold]")
-    user_context = user_interaction.gather_user_context()
+    console.print("\n[bold]Step 3: Building incident context...[/bold]")
+    user_context = {
+        "incident_time":     incident_time,
+        "affected_services": "auto-detected from logs",
+        "recent_changes":    "None",
+        "environment":       "production",
+        "additional_notes":  "",
+    }
+    console.print(f"[dim]Incident time: {incident_time}[/dim]")
 
     # ------------------------------------------------------------------
     # Step 4 — Analyse with Claude
@@ -97,5 +104,10 @@ if __name__ == "__main__":
         default=_DEFAULT_LOGS_DIR,
         help=f"Path to logs directory (default: '{_DEFAULT_LOGS_DIR}')",
     )
+    parser.add_argument(
+        "--incident-time",
+        required=True,
+        help="Incident start date/time (e.g. '2026-03-20 14:00 UTC')",
+    )
     args = parser.parse_args()
-    main(logs_dir=args.logs_dir)
+    main(logs_dir=args.logs_dir, incident_time=args.incident_time)
