@@ -5,3 +5,5 @@ __pycache__/
 output/
 .DS_Store
 Thumbs.db
+logs/*.log
+logs/*.txt
