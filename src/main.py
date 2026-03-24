@@ -6,13 +6,14 @@ Run with:
 """
 
 import sys
+from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
 
 from src import log_reader, log_parser, claude_analyst, rca_generator
 
-_DEFAULT_LOGS_DIR = "logs"
+_DEFAULT_LOGS_DIR = str(Path(__file__).parent.parent / "logs")
 
 console = Console()
 
