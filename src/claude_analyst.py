@@ -133,6 +133,42 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
 
     client = anthropic.Anthropic(api_key=api_key)
 
+    # Priority tiers — lower number = more important
+    _PRIORITY = {
+        "CrashLoopBackOff": 1, "OOMKilled": 1, "NodeNotReady": 1, "Evicted": 1,
+        "ImagePullError": 2, "LivenessFail": 2, "ReadinessFail": 2, "ConnectionError": 2,
+        "PodRestart": 3, "Exception": 3, "BackOff": 3,
+        "IFSError": 3, "LinkerdError": 3, "IngressError": 3, "ScalingError": 3,
+    }
+    _SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
+
+    sorted_errors = sorted(
+        errors,
+        key=lambda e: (
+            _PRIORITY.get(e.error_type, 9),
+            _SEV_ORDER.get(e.severity, 9),
+        ),
+    )
+
+    # Step 1: guarantee one representative per error type
+    sampled: List[LogError] = []
+    seen_types: set = set()
+    for e in sorted_errors:
+        if e.error_type not in seen_types:
+            seen_types.add(e.error_type)
+            sampled.append(e)
+
+    # Step 2: fill remaining slots (up to 50) with highest-priority unseen (pod, type) pairs
+    _CAP = 50
+    seen_pairs: set = {(e.error_type, e.pod_name) for e in sampled}
+    for e in sorted_errors:
+        if len(sampled) >= _CAP:
+            break
+        key = (e.error_type, e.pod_name)
+        if key not in seen_pairs:
+            seen_pairs.add(key)
+            sampled.append(e)
+
     error_list = [
         {
             "timestamp":  e.timestamp,
@@ -144,8 +180,14 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
             "file_type":  e.file_type,
             "severity":   e.severity,
         }
-        for e in errors
+        for e in sampled
     ]
+
+    if len(sampled) < len(errors):
+        console.print(
+            f"[dim]Sending {len(sampled)} representative errors to Claude "
+            f"(selected from {len(errors)} total by priority)[/dim]"
+        )
 
     payload = {
         "total_errors_found":    len(errors),
@@ -168,7 +210,7 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
 
     response = client.messages.create(
         model="claude-opus-4-6",
-        max_tokens=8192,
+        max_tokens=4096,
         system=_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt_text}],
     )
