@@ -80,7 +80,7 @@ Be precise and evidence-based. Reference specific pod names, timestamps, and err
 messages from the supplied data. Do not invent facts not present in the evidence."""
 
 
-_MAX_PHASES = 5
+_MAX_PHASES = 2
 
 # ---------------------------------------------------------------------------
 # Phase system prompts
