@@ -364,18 +364,22 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
     }
     _SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
 
-    # Pod priority — IFS critical services first
+    # Pod priority — lower = more important
     def _pod_score(pod: str) -> int:
         p = pod.lower()
-        if any(k in p for k in ("odata",)):
-            return 0
-        if any(k in p for k in ("iam",)):
-            return 1
-        if any(k in p for k in ("client",)):
-            return 2
-        if any(k in p for k in ("report", "crystal")):
-            return 3
-        return 4
+        if "odata" in p:                            return 0  # ifsapp-odata
+        if "iam" in p:                              return 1  # ifsapp-iam
+        if "client-services" in p:                  return 2  # ifsapp-client-services
+        if "proxy" in p:                            return 3  # ifsapp-proxy
+        if "client-notification" in p:              return 4  # ifsapp-client-notification
+        if "client" in p:                           return 5  # ifsapp-client
+        if "connect" in p:                          return 6  # ifsapp-connect
+        if "application-svc" in p:                  return 7  # ifsapp-application-svc
+        if "db-init" in p:                          return 8  # ifs-db-init
+        if "docman" in p or "esign" in p:           return 9  # ifsapp-docman-esign
+        if "doc" in p:                              return 10 # ifsapp-doc
+        if "reporting" in p or "crystal" in p:      return 11 # ifsapp-reporting-*
+        return 99  # anything else (should be filtered out already)
 
     sorted_errors = sorted(
         errors,

@@ -31,6 +31,64 @@ class LogError:
 
 
 # ---------------------------------------------------------------------------
+# IFS pod whitelist — only errors from these pods are kept.
+# Pod names in logs carry a random suffix (e.g. ifsapp-odata-7d9f4b-xk2p),
+# so we match by prefix/substring.
+# ---------------------------------------------------------------------------
+
+IFS_POD_PREFIXES = (
+    "ifs-db-init",
+    "ifsapp-application-svc",
+    "ifsapp-client-notification",
+    "ifsapp-client-services",
+    "ifsapp-client",
+    "ifsapp-connect",
+    "ifsapp-docman-esign",
+    "ifsapp-doc",
+    "ifsapp-iam",
+    "ifsapp-odata",
+    "ifsapp-proxy",
+    "ifsapp-reporting-br",
+    "ifsapp-reporting-cr",
+    "ifsapp-reporting-ren",
+    "ifsapp-reporting",
+)
+
+
+def _strip_linkerd_suffix(name: str) -> str:
+    """Remove Linkerd container suffixes so the underlying IFS pod name is exposed."""
+    for suffix in ("-linkerd-proxy", "-linkerd"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _is_ifs_pod(pod_name: str, source_file: str = "", file_type: str = "") -> bool:
+    """
+    Return True if the pod belongs to the IFS whitelist.
+
+    For Linkerd sidecar logs the extracted pod_name may be just 'linkerd-proxy'
+    (the container name) rather than the IFS pod name, so we also fall back to
+    checking the source file path which carries the full pod name.
+    """
+    if pod_name == "unknown":
+        return True
+
+    # Strip Linkerd container suffix before matching
+    cleaned = _strip_linkerd_suffix(pod_name.lower())
+    if any(cleaned.startswith(p) or p in cleaned for p in IFS_POD_PREFIXES):
+        return True
+
+    # Fallback for linkerd_log: check the file path (contains full pod name)
+    if file_type == "linkerd_log" and source_file:
+        sf = source_file.lower()
+        if any(p in sf for p in IFS_POD_PREFIXES):
+            return True
+
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Error patterns  (order matters — first match wins per line)
 # ---------------------------------------------------------------------------
 
@@ -324,13 +382,20 @@ def parse_errors(
             else:
                 pod_name, namespace = _extract_pod_ns(line, file_type, source)
 
+            # Drop errors from pods outside the IFS whitelist
+            if not _is_ifs_pod(pod_name, source_file=source, file_type=file_type):
+                break
+
+            # Store clean pod name (strip Linkerd container suffix)
+            clean_pod = _strip_linkerd_suffix(pod_name)
+
             errors.append(LogError(
                 timestamp=ts_str,
                 source_file=source,
                 file_type=file_type,
                 error_type=error_type,
                 message=line[:300],
-                pod_name=pod_name,
+                pod_name=clean_pod,
                 namespace=namespace,
                 severity=_extract_severity(line),
             ))
