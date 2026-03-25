@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from rich.console import Console
 
 from src.log_parser import LogError
+from src import knowledge_base
 
 load_dotenv()
 
@@ -133,19 +134,41 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    # Priority tiers — lower number = more important
+    # Error type priority — lower = more important
     _PRIORITY = {
-        "CrashLoopBackOff": 1, "OOMKilled": 1, "NodeNotReady": 1, "Evicted": 1,
-        "ImagePullError": 2, "LivenessFail": 2, "ReadinessFail": 2, "ConnectionError": 2,
-        "PodRestart": 3, "Exception": 3, "BackOff": 3,
-        "IFSError": 3, "LinkerdError": 3, "IngressError": 3, "ScalingError": 3,
+        # Scheduling gates (pod never starts — investigate first)
+        "Gate1_ResourceQuota": 1, "Gate2_LimitRange": 1,
+        "Gate3_InsufficientResources": 1, "Gate4_TaintToleration": 1,
+        "Gate5_AffinityMismatch": 1, "Gate6_AntiAffinity": 1,
+        "Gate7_PVCPending": 1, "Gate8_TopologySpread": 1,
+        # Critical runtime failures
+        "CrashLoopBackOff": 2, "OOMKilled": 2, "NodeNotReady": 2, "Evicted": 2,
+        # Probe / image / connectivity
+        "ImagePullError": 3, "LivenessFail": 3, "ReadinessFail": 3, "ConnectionError": 3,
+        # Lower signal
+        "PodRestart": 4, "Exception": 4, "BackOff": 4,
+        "IFSError": 4, "LinkerdError": 4, "IngressError": 4, "ScalingError": 4,
     }
     _SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
+
+    # Pod priority — IFS critical services first
+    def _pod_score(pod: str) -> int:
+        p = pod.lower()
+        if any(k in p for k in ("odata",)):
+            return 0
+        if any(k in p for k in ("iam",)):
+            return 1
+        if any(k in p for k in ("client",)):
+            return 2
+        if any(k in p for k in ("report", "crystal")):
+            return 3
+        return 4
 
     sorted_errors = sorted(
         errors,
         key=lambda e: (
             _PRIORITY.get(e.error_type, 9),
+            _pod_score(e.pod_name),
             _SEV_ORDER.get(e.severity, 9),
         ),
     )
@@ -197,13 +220,23 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
         "errors":                error_list,
     }
 
+    # Knowledge base — find similar past incidents
+    similar = knowledge_base.find_similar(errors, top_n=3, min_score=0.25)
+    kb_block = knowledge_base.format_for_prompt(similar)
+    if similar:
+        console.print(
+            f"[bold green]Knowledge base:[/bold green] found {len(similar)} similar "
+            f"past incident(s) — injecting into prompt."
+        )
+
     prompt_text = (
         "Please produce a full Root Cause Analysis report following the 9-section "
         "structure defined in the system prompt.\n\n"
         "Source type key: container_log=kubectl-logs output; "
         "linkerd_log=Linkerd sidecar proxy; kubectl_describe=kubectl describe output; "
         "other=miscellaneous.\n\n"
-        f"```json\n{json.dumps(payload, indent=2)}\n```"
+        + (f"{kb_block}\n\n" if kb_block else "")
+        + f"```json\n{json.dumps(payload, indent=2)}\n```"
     )
 
     console.print("\n[bold cyan]Sending data to Claude Opus 4.6 for RCA analysis...[/bold cyan]")

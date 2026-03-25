@@ -11,6 +11,7 @@ strategy for pod name, namespace, and severity.
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,48 @@ class LogError:
 # ---------------------------------------------------------------------------
 
 PATTERNS: Dict[str, re.Pattern] = {
+    # -----------------------------------------------------------------------
+    # IFS Scheduling Gates (highest priority — pod never starts)
+    # -----------------------------------------------------------------------
+    "Gate1_ResourceQuota":        re.compile(
+        r"exceeded quota|resource quota|quota.*exceeded|ResourceQuota|"
+        r"forbidden.*exceeded.*quota",
+        re.IGNORECASE),
+    "Gate2_LimitRange":           re.compile(
+        r"LimitRange|limit range.*violation|"
+        r"maximum (cpu|memory).*exceed|pods.*forbidden.*limit",
+        re.IGNORECASE),
+    "Gate3_InsufficientResources":re.compile(
+        r"Insufficient (cpu|memory)|0/\d+ nodes.*available|"
+        r"no nodes are available|insufficient resources|"
+        r"nodes.*had.*insufficient",
+        re.IGNORECASE),
+    "Gate4_TaintToleration":      re.compile(
+        r"taint.*NoSchedule|had taint.*NoSchedule|"
+        r"didn.t tolerate|untolerated taint|"
+        r"nodes.*taint.*not tolerated",
+        re.IGNORECASE),
+    "Gate5_AffinityMismatch":     re.compile(
+        r"didn.t match.*node selector|nodeAffinity|"
+        r"MatchNodeSelector|node\(s\) didn.t match|"
+        r"node selector.*not match",
+        re.IGNORECASE),
+    "Gate6_AntiAffinity":         re.compile(
+        r"anti.affinity|AntiAffinity|pod anti affinity|"
+        r"didn.t match.*anti.affinity",
+        re.IGNORECASE),
+    "Gate7_PVCPending":           re.compile(
+        r"PVC.*Pending|persistentvolumeclaim.*pending|"
+        r"unbound.*PVC|no persistent volumes available|"
+        r"waiting.*volume.*bind",
+        re.IGNORECASE),
+    "Gate8_TopologySpread":       re.compile(
+        r"topology spread|topologySpreadConstraints|"
+        r"ErrTopologySpread|maxSkew",
+        re.IGNORECASE),
+    # -----------------------------------------------------------------------
     # Kubernetes lifecycle
+    # -----------------------------------------------------------------------
     "CrashLoopBackOff":  re.compile(r"CrashLoopBackOff", re.IGNORECASE),
     "OOMKilled":         re.compile(r"OOMKilled|Out of memory|memory limit exceeded|Reason:\s+OOMKilled", re.IGNORECASE),
     "ImagePullError":    re.compile(r"ImagePullBackOff|ErrImagePull|Failed to pull image|Back-off pulling image", re.IGNORECASE),
@@ -74,6 +116,57 @@ def _extract_timestamp(line: str) -> str:
         if m:
             return m.group(0)
     return "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Time window helpers
+# ---------------------------------------------------------------------------
+
+_TS_FORMATS = [
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S",
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S",
+    "%Y-%m-%d %H:%M",
+]
+
+
+def _parse_dt(ts: str) -> Optional[datetime]:
+    """Parse a timestamp string to an aware UTC datetime, or None."""
+    if not ts or ts == "unknown":
+        return None
+    for fmt in _TS_FORMATS:
+        try:
+            return datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    # Syslog format (no year): "Mar 20 14:03:22"
+    try:
+        dt = datetime.strptime(ts, "%b %d %H:%M:%S")
+        return dt.replace(year=datetime.now(timezone.utc).year, tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    # Epoch (ms or s)
+    try:
+        epoch = int(ts)
+        if epoch > 1e10:
+            epoch /= 1000
+        return datetime.fromtimestamp(epoch, tz=timezone.utc)
+    except (ValueError, OSError):
+        pass
+    return None
+
+
+def _parse_incident_dt(incident_time: str) -> Optional[datetime]:
+    """Parse the user-supplied incident time string to UTC datetime."""
+    clean = incident_time.upper().replace("UTC", "").replace("Z", "").strip()
+    for fmt in _TS_FORMATS + ["%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M"]:
+        try:
+            return datetime.strptime(clean, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -165,26 +258,39 @@ class _DescribeState:
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse_errors(raw_lines: List[Dict[str, str]]) -> List[LogError]:
+def parse_errors(
+    raw_lines: List[Dict[str, str]],
+    incident_time: str = "",
+    window_hours: int = 48,
+) -> List[LogError]:
     """
     Parse a list of raw log line dicts into LogError objects.
 
     Args:
-        raw_lines: Output from log_reader.read_logs()
-                   Each dict has keys: source_file, line, file_type.
+        raw_lines:      Output from log_reader.read_logs()
+        incident_time:  Incident start time string (e.g. "2026-03-20 14:00 UTC").
+                        When provided, only errors within `window_hours` before
+                        (and 2 hours after) this time are kept.
+        window_hours:   Look-back window in hours (default 48).
 
     Returns:
         List of LogError (one per matched line, first pattern wins).
     """
+    # Build time window bounds
+    incident_dt = _parse_incident_dt(incident_time) if incident_time else None
+    window_start = incident_dt - timedelta(hours=window_hours) if incident_dt else None
+    window_end   = incident_dt + timedelta(hours=2)            if incident_dt else None
+
     errors: List[LogError] = []
+    skipped_by_time = 0
 
     # Per-file describe state (pod/ns persist across lines in a describe file)
     describe_states: Dict[str, _DescribeState] = {}
 
     for entry in raw_lines:
-        line        = entry.get("line", "")
-        source      = entry.get("source_file", "unknown")
-        file_type   = entry.get("file_type", "other")
+        line      = entry.get("line", "")
+        source    = entry.get("source_file", "unknown")
+        file_type = entry.get("file_type", "other")
 
         # Update running pod/ns state for describe files
         if file_type == "kubectl_describe":
@@ -196,12 +302,20 @@ def parse_errors(raw_lines: List[Dict[str, str]]) -> List[LogError]:
             if not pattern.search(line):
                 continue
 
+            ts_str = _extract_timestamp(line)
+
+            # Time-window filter (skip only when we can parse the timestamp)
+            if window_start and ts_str != "unknown":
+                line_dt = _parse_dt(ts_str)
+                if line_dt and not (window_start <= line_dt <= window_end):
+                    skipped_by_time += 1
+                    break
+
             # Derive pod + namespace
             if file_type == "kubectl_describe" and source in describe_states:
                 st = describe_states[source]
                 pod_name  = st.pod
                 namespace = st.ns
-                # Override if the line itself has explicit values
                 inline_pod, inline_ns = _extract_pod_ns(line, file_type, source)
                 if inline_pod != "unknown":
                     pod_name = inline_pod
@@ -211,7 +325,7 @@ def parse_errors(raw_lines: List[Dict[str, str]]) -> List[LogError]:
                 pod_name, namespace = _extract_pod_ns(line, file_type, source)
 
             errors.append(LogError(
-                timestamp=_extract_timestamp(line),
+                timestamp=ts_str,
                 source_file=source,
                 file_type=file_type,
                 error_type=error_type,
@@ -221,5 +335,12 @@ def parse_errors(raw_lines: List[Dict[str, str]]) -> List[LogError]:
                 severity=_extract_severity(line),
             ))
             break  # one error type per line
+
+    if skipped_by_time:
+        from rich.console import Console as _C
+        _C().print(
+            f"[dim]Time-window filter: skipped {skipped_by_time} error(s) "
+            f"outside the {window_hours}h window.[/dim]"
+        )
 
     return errors

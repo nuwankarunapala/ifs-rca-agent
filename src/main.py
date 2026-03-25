@@ -11,7 +11,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.panel import Panel
 
-from src import log_reader, log_parser, claude_analyst, rca_generator
+from src import log_reader, log_parser, claude_analyst, rca_generator, knowledge_base
 
 _DEFAULT_LOGS_DIR = str(Path(__file__).parent.parent / "logs")
 
@@ -48,7 +48,7 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     # Step 2 — Parse errors
     # ------------------------------------------------------------------
     console.print("\n[bold]Step 2: Parsing errors from logs...[/bold]")
-    errors = log_parser.parse_errors(raw_lines)
+    errors = log_parser.parse_errors(raw_lines, incident_time=incident_time, window_hours=48)
 
     if not errors:
         console.print(
@@ -87,6 +87,12 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     # ------------------------------------------------------------------
     # Done
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Step 6 — Save to knowledge base
+    # ------------------------------------------------------------------
+    console.print("\n[bold]Step 6: Saving incident to knowledge base...[/bold]")
+    knowledge_base.save_incident(errors, user_context, analysis)
+
     console.print(
         Panel(
             f"[bold green]RCA report generated successfully![/bold green]\n\n"
