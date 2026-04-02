@@ -316,6 +316,39 @@ class _DescribeState:
 # Public API
 # ---------------------------------------------------------------------------
 
+def extract_context(raw_lines: List[Dict[str, str]]) -> Dict[str, str]:
+    """
+    Extract non-log contextual content from specially named files:
+
+        ticket / incident files  → free-text incident communications
+        kubectl-events files     → cluster event output
+        kubectl-top files        → resource usage snapshot
+        kubectl-get files        → pod/resource listing
+
+    Returns a dict with keys: ticket, kubectl_events, kubectl_top, kubectl_get.
+    Each value is the concatenated text content (capped at 3000 chars each).
+    Only populated keys are included.
+    """
+    buckets: Dict[str, list] = {
+        "ticket":        [],
+        "kubectl_events": [],
+        "kubectl_top":   [],
+        "kubectl_get":   [],
+    }
+
+    for entry in raw_lines:
+        ft = entry.get("file_type", "")
+        if ft in buckets:
+            buckets[ft].append(entry.get("line", ""))
+
+    result: Dict[str, str] = {}
+    for key, lines in buckets.items():
+        if lines:
+            result[key] = "\n".join(lines)[:3000]
+
+    return result
+
+
 def parse_errors(
     raw_lines: List[Dict[str, str]],
     incident_time: str = "",

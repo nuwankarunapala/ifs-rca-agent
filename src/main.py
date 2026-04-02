@@ -60,6 +60,14 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     console.print(f"[green]Detected {len(errors)} error event(s).[/green]")
 
     # ------------------------------------------------------------------
+    # Step 2b — Extract ticket / kubectl command context
+    # ------------------------------------------------------------------
+    extra_context = log_parser.extract_context(raw_lines)
+    if extra_context:
+        found = ", ".join(extra_context.keys())
+        console.print(f"[dim]Extra context found: {found}[/dim]")
+
+    # ------------------------------------------------------------------
     # Step 3 — Build user context from CLI argument
     # ------------------------------------------------------------------
     console.print("\n[bold]Step 3: Building incident context...[/bold]")
@@ -76,7 +84,7 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     # Step 4 — Analyse with Claude
     # ------------------------------------------------------------------
     console.print("\n[bold]Step 4: Analysing with Claude...[/bold]")
-    analysis = claude_analyst.analyze_with_claude(errors, user_context)
+    analysis = claude_analyst.analyze_with_claude(errors, user_context, extra_context=extra_context)
 
     # ------------------------------------------------------------------
     # Step 5 — Generate RCA document

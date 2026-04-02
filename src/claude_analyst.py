@@ -22,6 +22,18 @@ _SYSTEM_PROMPT = """You are a Senior Site Reliability Engineer (SRE) specialisin
 Kubernetes infrastructure and IFS ERP systems. You produce formal Root Cause Analysis
 (RCA) reports used by engineering teams, management, and CAB (Change Advisory Board).
 
+DEPLOYMENT ENVIRONMENT — read carefully before analysing:
+- Platform  : Ubuntu MicroK8s (lightweight single-node or very-few-node Kubernetes)
+- HA model  : Multiple pod REPLICAS per service — NOT multiple nodes
+- Consequence: Pod anti-affinity (Gate 6) and topology-spread constraints (Gate 8)
+  are the MOST COMMON scheduling failure causes because a second replica cannot be
+  placed on the same (only) node when requiredDuringScheduling rules are set.
+  ALWAYS check these two gates first on any Pending pod.
+- NodeNotReady is a total-outage event (only node) — treat as P1 immediately.
+- Resource exhaustion (Gate 3) is still very likely on a single node shared by all
+  IFS pods (App Server, BO Server, MWS, OData, IAM, Reporting, etc.).
+- Reference docs: https://docs.ifs.com/techdocs/25r2/ and https://community.ifs.com/
+
 You will receive a JSON payload containing:
   - user_context   : incident metadata supplied by the engineer
   - errors         : structured log events extracted from multiple sources
@@ -149,15 +161,20 @@ Produce these sections:
 A previous phase identified SCHEDULING FAILURES (pod stuck Pending).
 Your task: identify which scheduling gate is blocking the pod.
 
-Check each gate with evidence:
+ENVIRONMENT: Ubuntu MicroK8s — typically SINGLE NODE with multiple pod replicas for HA.
+Gates 6 and 8 are the most likely culprits — check them FIRST.
+
+Check each gate with evidence (priority order for MicroK8s single-node):
+Gate 6 — Pod anti-affinity unsatisfiable ★ MOST LIKELY on single-node MicroK8s
+          (requiredDuringScheduling prevents 2nd replica landing on same node)
+Gate 8 — Topology spread constraint violated ★ VERY LIKELY on single-node
+          (maxSkew + DoNotSchedule with only 1 node = 2nd pod stays Pending forever)
+Gate 3 — No allocatable CPU/memory — single node shared by ALL IFS pods, easy to exhaust
 Gate 1 — ResourceQuota exceeded in namespace
-Gate 2 — LimitRange violation (no resources.requests defined)
-Gate 3 — No node has enough allocatable CPU/memory for IFS pod requests
-Gate 4 — Taint not tolerated (NoSchedule taint on IFS node pool)
-Gate 5 — nodeSelector/nodeAffinity label mismatch (node pool rotation?)
-Gate 6 — Pod anti-affinity unsatisfiable (single-zone cluster, HA deployment)
-Gate 7 — PVC not bound (StorageClass unavailable or no matching PV)
-Gate 8 — Topology spread constraint violated (maxSkew, DoNotSchedule)
+Gate 2 — LimitRange violation (no resources.requests defined in IFS Helm chart)
+Gate 7 — PVC not bound (MicroK8s uses hostpath-storage by default — check StorageClass)
+Gate 4 — Taint not tolerated
+Gate 5 — nodeSelector/nodeAffinity label mismatch
 
 Produce these sections:
 ## Scheduling Failure Investigation
@@ -322,17 +339,24 @@ RECOMMENDATIONS:
 """
 
 
-def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) -> str:
+def analyze_with_claude(
+    errors: List[LogError],
+    user_context: Dict[str, str],
+    extra_context: Dict[str, str] = None,
+) -> str:
     """
     Send errors and context to Claude Opus 4.6 and return the structured RCA text.
 
     Args:
-        errors:       List of LogError objects from the parser.
-        user_context: Dict from user_interaction.gather_user_context().
+        errors:        List of LogError objects from the parser.
+        user_context:  Dict from user_interaction.gather_user_context().
+        extra_context: Optional dict from log_parser.extract_context() containing
+                       ticket, kubectl_events, kubectl_top, kubectl_get content.
 
     Returns:
         Claude's RCA as a Markdown string with the 9-section structure.
     """
+    extra_context = extra_context or {}
     if os.getenv("MOCK_MODE", "false").strip().lower() == "true":
         console.print(
             "\n[bold yellow][MOCK MODE] Skipping real API call - using mock response[/bold yellow]"
@@ -349,11 +373,12 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
 
     # Error type priority — lower = more important
     _PRIORITY = {
-        # Scheduling gates (pod never starts — investigate first)
-        "Gate1_ResourceQuota": 1, "Gate2_LimitRange": 1,
-        "Gate3_InsufficientResources": 1, "Gate4_TaintToleration": 1,
-        "Gate5_AffinityMismatch": 1, "Gate6_AntiAffinity": 1,
-        "Gate7_PVCPending": 1, "Gate8_TopologySpread": 1,
+        # Scheduling gates — on MicroK8s single-node, Gate6 and Gate8 are most common
+        "Gate6_AntiAffinity": 1, "Gate8_TopologySpread": 1,       # ★ single-node HA issue
+        "Gate3_InsufficientResources": 1,                          # single node runs out fast
+        "Gate1_ResourceQuota": 2, "Gate2_LimitRange": 2,
+        "Gate7_PVCPending": 2,
+        "Gate4_TaintToleration": 3, "Gate5_AffinityMismatch": 3,
         # Critical runtime failures
         "CrashLoopBackOff": 2, "OOMKilled": 2, "NodeNotReady": 2, "Evicted": 2,
         # Probe / image / connectivity
@@ -436,6 +461,20 @@ def analyze_with_claude(errors: List[LogError], user_context: Dict[str, str]) ->
         "user_context":          user_context,
         "errors":                error_list,
     }
+
+    # Inject ticket / kubectl command context if present
+    if extra_context.get("ticket"):
+        payload["incident_communications"] = extra_context["ticket"]
+        console.print("[dim]Incident ticket/communications found — included in analysis.[/dim]")
+    if extra_context.get("kubectl_events"):
+        payload["kubectl_events"] = extra_context["kubectl_events"]
+        console.print("[dim]kubectl events output found — included in analysis.[/dim]")
+    if extra_context.get("kubectl_top"):
+        payload["kubectl_top"] = extra_context["kubectl_top"]
+        console.print("[dim]kubectl top output found — included in analysis.[/dim]")
+    if extra_context.get("kubectl_get"):
+        payload["kubectl_get"] = extra_context["kubectl_get"]
+        console.print("[dim]kubectl get output found — included in analysis.[/dim]")
 
     # Knowledge base — find similar past incidents
     similar = knowledge_base.find_similar(errors, top_n=3, min_score=0.25)

@@ -45,11 +45,34 @@ def _classify(relative_parts: tuple) -> str:
     """
     Derive a file_type string from the relative path parts.
 
-    Args:
-        relative_parts: tuple of path components below logs_dir, e.g.
-                        ('IFS_Cloud', 'pods', 'linkerd_logs', 'ifs-app-sidecar.log')
+    Filename-prefix convention (takes priority — works from any subdirectory):
+        ticket-*          →  ticket          (Jira/ServiceNow/Slack/email thread)
+        kubectl-events-*  →  kubectl_events  (kubectl get events -n <ns>)
+        kubectl-top-*     →  kubectl_top     (kubectl top pods / nodes)
+        kubectl-get-*     →  kubectl_get     (kubectl get pods -o wide, etc.)
+        kubectl-describe-*→  kubectl_describe (kubectl describe pod/deploy)
+
+    Directory-based convention (fallback):
+        …/linkerd_logs/…  →  linkerd_log
+        …/descriptions/…  →  kubectl_describe
+        …/logs/…          →  container_log
     """
+    filename = relative_parts[-1].lower() if relative_parts else ""
     parts_lower = [p.lower() for p in relative_parts]
+
+    # Filename-prefix detection (highest priority)
+    if filename.startswith("ticket-") or filename.startswith("incident-"):
+        return "ticket"
+    if filename.startswith("kubectl-events"):
+        return "kubectl_events"
+    if filename.startswith("kubectl-top"):
+        return "kubectl_top"
+    if filename.startswith("kubectl-get"):
+        return "kubectl_get"
+    if filename.startswith("kubectl-describe"):
+        return "kubectl_describe"
+
+    # Directory-based detection (fallback)
     if "linkerd_logs" in parts_lower:
         return "linkerd_log"
     if "descriptions" in parts_lower:
