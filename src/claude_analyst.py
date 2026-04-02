@@ -339,6 +339,262 @@ RECOMMENDATIONS:
 """
 
 
+_HEALTH_SYSTEM_PROMPT = """You are a Senior Site Reliability Engineer (SRE) specialising in
+Kubernetes infrastructure and IFS ERP systems. You are performing a PROACTIVE HEALTH ASSESSMENT
+— not investigating a specific incident. Your goal is to identify current health status, risks,
+and potential issues before they become incidents.
+
+DEPLOYMENT ENVIRONMENT — read carefully before analysing:
+- Platform  : Ubuntu MicroK8s (lightweight single-node or very-few-node Kubernetes)
+- HA model  : Multiple pod REPLICAS per service — NOT multiple nodes
+- Consequence: Pod anti-affinity (Gate 6) and topology-spread constraints (Gate 8) are the MOST
+  COMMON scheduling risks because a second replica cannot be placed on the same (only) node when
+  requiredDuringScheduling rules are set.
+- Resource exhaustion is a constant risk on a single node shared by all IFS pods.
+- Reference docs: https://docs.ifs.com/techdocs/25r2/ and https://community.ifs.com/
+
+You will receive a JSON payload with detected log events and error patterns.
+Produce a HEALTH REPORT with EXACTLY these seven sections using the Markdown headings shown
+(the document generator depends on them):
+
+## 1. Cluster Health Overview
+Overall cluster status: Healthy / Warning / Critical.
+2-3 sentence summary of what the logs reveal about current cluster state.
+Health score table per subsystem: Scheduling | Resources | Networking | Application | Storage
+(each scored: Healthy / Warning / Critical / Unknown)
+
+## 2. Risk Assessment
+Table with columns: Risk | Severity | Component | Evidence | Likelihood
+Severity: P1 (imminent failure), P2 (degradation within days), P3 (long-term concern).
+Include ALL identified risks, ordered P1 → P2 → P3.
+
+## 3. Resource & Capacity Analysis
+- CPU and memory pressure indicators from logs
+- Pods approaching or exceeding resource limits
+- ResourceQuota / LimitRange utilisation
+- Capacity headroom assessment for the single node
+- HPA / autoscaler behaviour observations
+
+## 4. Service Health Status
+Per-component health table: Component | Status | Observations
+Components: ifsapp-odata, ifsapp-iam, ifsapp-client, ifsapp-proxy, ifsapp-connect,
+            ifsapp-reporting, ifsapp-docman, ifsapp-application-svc, ifs-db-init
+Status options: Healthy | Degraded | At Risk | Unknown (no data)
+
+## 5. Configuration & Scheduling Concerns
+- Anti-affinity / topology spread issues specific to MicroK8s single-node
+- PVC / StorageClass concerns
+- Missing or low resource requests/limits in pod specs
+- Any detected misconfigurations (NetworkPolicy, Ingress, Linkerd)
+
+## 6. Missing Information
+What additional data would improve this health assessment?
+Table with columns: Missing Data | Why It Matters | How to Collect (kubectl command)
+Be specific — list actual kubectl commands the engineer should run.
+
+## 7. Recommendations
+Table with columns: Action | Priority | Component | Expected Benefit
+Order by priority P1 first. Include only actionable items with clear owners.
+
+Be evidence-based. Reference specific pod names, error counts, and timestamps from the data.
+If the logs show no errors, state that explicitly and assess capacity and config risks instead."""
+
+
+_MOCK_HEALTH_RESPONSE = """\
+## 1. Cluster Health Overview
+
+Overall status: **Warning** — several scheduling and resource pressure signals detected.
+
+The logs show recurring Gate 6 (anti-affinity) and Gate 8 (topology spread) violations
+indicating that HA replica placement is failing on this single-node MicroK8s cluster.
+Memory pressure on the ifsapp-odata pod is approaching its configured limit.
+
+| Subsystem    | Status  |
+|--------------|---------|
+| Scheduling   | Warning |
+| Resources    | Warning |
+| Networking   | Healthy |
+| Application  | Healthy |
+| Storage      | Unknown |
+
+## 2. Risk Assessment
+
+| Risk | Severity | Component | Evidence | Likelihood |
+|------|----------|-----------|----------|------------|
+| Second replica of ifsapp-odata cannot be scheduled | P1 | ifsapp-odata | Gate6_AntiAffinity events | High |
+| Memory OOMKill if traffic spikes | P2 | ifsapp-odata | RSS 1.8Gi / 2Gi limit | Medium |
+| Topology spread blocking iam replica | P2 | ifsapp-iam | Gate8_TopologySpread events | High |
+
+## 3. Resource & Capacity Analysis
+
+- ifsapp-odata: memory at ~90% of 2Gi limit — OOMKill risk under load
+- Single node: all IFS pods sharing node resources; no burst headroom observed
+- No kubectl top data available — recommend running `kubectl top nodes` and `kubectl top pods`
+
+## 4. Service Health Status
+
+| Component | Status | Observations |
+|-----------|--------|--------------|
+| ifsapp-odata | At Risk | Memory pressure, Gate6 scheduling failures |
+| ifsapp-iam | Degraded | Gate8 topology spread violations |
+| ifsapp-client | Healthy | No errors detected |
+| ifsapp-proxy | Unknown | No log data available |
+
+## 5. Configuration & Scheduling Concerns
+
+- Anti-affinity rules set to `requiredDuringScheduling` — this prevents 2nd replica on single-node MicroK8s
+- Topology spread `maxSkew: 1` with `DoNotSchedule` — same issue as above
+- Recommend switching to `preferredDuringScheduling` for non-production or adding a second node
+
+## 6. Missing Information
+
+| Missing Data | Why It Matters | How to Collect |
+|--------------|----------------|----------------|
+| Node resource usage | Confirm capacity headroom | `kubectl top nodes` |
+| Pod resource usage | Identify memory/CPU hotspots | `kubectl top pods -A` |
+| PVC status | Storage health | `kubectl get pvc -A` |
+| Recent events | Scheduling/probe failures | `kubectl get events -A --sort-by=.lastTimestamp` |
+
+## 7. Recommendations
+
+| Action | Priority | Component | Expected Benefit |
+|--------|----------|-----------|-----------------|
+| Change anti-affinity to `preferredDuringScheduling` | P1 | ifsapp-odata, ifsapp-iam | Allow HA replicas on single node |
+| Increase ifsapp-odata memory limit to 3Gi | P1 | ifsapp-odata | Prevent OOMKill under load |
+| Add `kubectl top` outputs to log collection | P2 | All | Better capacity analysis |
+| Review topology spread constraints across all deployments | P2 | All | Prevent future Gate8 blocks |
+"""
+
+
+def analyze_health(
+    errors: List[LogError],
+    extra_context: Dict[str, str] = None,
+) -> str:
+    """
+    Perform a proactive health assessment of the cluster based on log data.
+
+    Unlike analyze_with_claude(), this does not require an incident — it assesses
+    overall cluster health, identifies risks, and flags missing information.
+
+    Args:
+        errors:        All LogError objects detected in the logs.
+        extra_context: Optional dict from log_parser.extract_context().
+
+    Returns:
+        Claude's 7-section health report as a Markdown string.
+    """
+    extra_context = extra_context or {}
+
+    if os.getenv("MOCK_MODE", "false").strip().lower() == "true":
+        console.print(
+            "\n[bold yellow][MOCK MODE] Skipping real API call - using mock health response[/bold yellow]"
+        )
+        return _MOCK_HEALTH_RESPONSE
+
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise EnvironmentError(
+            "ANTHROPIC_API_KEY not found. Copy .env.example to .env and add your key."
+        )
+
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Sample errors — guarantee one per type, up to 25 total
+    _PRIORITY = {
+        "Gate6_AntiAffinity": 1, "Gate8_TopologySpread": 1,
+        "Gate3_InsufficientResources": 1,
+        "Gate1_ResourceQuota": 2, "Gate2_LimitRange": 2, "Gate7_PVCPending": 2,
+        "Gate4_TaintToleration": 3, "Gate5_AffinityMismatch": 3,
+        "CrashLoopBackOff": 2, "OOMKilled": 2, "NodeNotReady": 2, "Evicted": 2,
+        "ImagePullError": 3, "LivenessFail": 3, "ReadinessFail": 3, "ConnectionError": 3,
+        "PodRestart": 4, "Exception": 4, "BackOff": 4,
+        "IFSError": 4, "LinkerdError": 4, "IngressError": 4, "ScalingError": 4,
+    }
+    _SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
+
+    sorted_errors = sorted(
+        errors,
+        key=lambda e: (_PRIORITY.get(e.error_type, 9), _SEV_ORDER.get(e.severity, 9)),
+    )
+
+    sampled: List[LogError] = []
+    seen_types: set = set()
+    for e in sorted_errors:
+        if e.error_type not in seen_types:
+            seen_types.add(e.error_type)
+            sampled.append(e)
+
+    _CAP = 25
+    seen_pairs: set = {(e.error_type, e.pod_name) for e in sampled}
+    for e in sorted_errors:
+        if len(sampled) >= _CAP:
+            break
+        key = (e.error_type, e.pod_name)
+        if key not in seen_pairs:
+            seen_pairs.add(key)
+            sampled.append(e)
+
+    if len(sampled) < len(errors):
+        console.print(
+            f"[dim]Sending {len(sampled)} representative errors to Claude "
+            f"(selected from {len(errors)} total by priority)[/dim]"
+        )
+
+    error_list = [
+        {
+            "timestamp":  e.timestamp,
+            "error_type": e.error_type,
+            "pod":        e.pod_name,
+            "namespace":  e.namespace,
+            "message":    e.message,
+            "source":     e.source_file,
+            "file_type":  e.file_type,
+            "severity":   e.severity,
+        }
+        for e in sampled
+    ]
+
+    payload = {
+        "analysis_type":         "proactive_health_assessment",
+        "total_events_found":    len(errors),
+        "errors_by_type":        dict(Counter(e.error_type for e in errors)),
+        "errors_by_source_type": dict(Counter(e.file_type  for e in errors)),
+        "affected_pods":         list({e.pod_name for e in errors if e.pod_name != "unknown"}),
+        "events":                error_list,
+    }
+
+    if extra_context.get("ticket"):
+        payload["incident_communications"] = extra_context["ticket"]
+        console.print("[dim]Ticket/communications context found — included.[/dim]")
+    if extra_context.get("kubectl_events"):
+        payload["kubectl_events"] = extra_context["kubectl_events"]
+        console.print("[dim]kubectl events output found — included.[/dim]")
+    if extra_context.get("kubectl_top"):
+        payload["kubectl_top"] = extra_context["kubectl_top"]
+        console.print("[dim]kubectl top output found — included.[/dim]")
+    if extra_context.get("kubectl_get"):
+        payload["kubectl_get"] = extra_context["kubectl_get"]
+        console.print("[dim]kubectl get output found — included.[/dim]")
+
+    prompt_text = (
+        "Please produce a full Cluster Health Report following the 7-section structure "
+        "defined in the system prompt. Assess current health, identify all risks, and "
+        "clearly state what additional information is needed.\n\n"
+        "Source type key: container_log=kubectl-logs; linkerd_log=Linkerd sidecar; "
+        "kubectl_describe=kubectl describe output; other=miscellaneous.\n\n"
+        f"```json\n{json.dumps(payload, indent=2)}\n```"
+    )
+
+    console.print("\n[bold cyan]Analysing cluster health with Claude...[/bold cyan]")
+    result = _call_claude(client, _HEALTH_SYSTEM_PROMPT, prompt_text, max_tokens=4096)
+
+    if not result:
+        return "No health analysis returned."
+
+    console.print("\n[bold green]Health assessment complete.[/bold green]")
+    return result
+
+
 def analyze_with_claude(
     errors: List[LogError],
     user_context: Dict[str, str],

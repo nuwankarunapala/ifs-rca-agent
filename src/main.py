@@ -18,13 +18,18 @@ _DEFAULT_LOGS_DIR = str(Path(__file__).parent.parent / "logs")
 console = Console()
 
 
-def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
+def main(
+    logs_dir: str = _DEFAULT_LOGS_DIR,
+    incident_time: str = "",
+    mode: str = "incident",
+) -> None:
     # ------------------------------------------------------------------
     # Welcome banner
     # ------------------------------------------------------------------
+    mode_label = "Health Check" if mode == "health-check" else "Incident RCA"
     console.print(
         Panel(
-            "[bold white]IFS RCA Agent[/bold white]\n"
+            f"[bold white]IFS RCA Agent — {mode_label}[/bold white]\n"
             "[dim]Powered by Claude Opus 4.6[/dim]",
             expand=False,
             border_style="cyan",
@@ -48,16 +53,27 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     # Step 2 — Parse errors
     # ------------------------------------------------------------------
     console.print("\n[bold]Step 2: Parsing errors from logs...[/bold]")
-    errors = log_parser.parse_errors(raw_lines, incident_time=incident_time, window_hours=48)
+
+    if mode == "health-check":
+        # No time filtering — analyse all events in the logs
+        errors = log_parser.parse_errors(raw_lines, incident_time="", window_hours=0)
+    else:
+        errors = log_parser.parse_errors(raw_lines, incident_time=incident_time, window_hours=48)
 
     if not errors:
-        console.print(
-            "[bold yellow]No known error patterns detected in the log files. "
-            "Exiting without generating a report.[/bold yellow]"
-        )
-        sys.exit(0)
-
-    console.print(f"[green]Detected {len(errors)} error event(s).[/green]")
+        if mode == "health-check":
+            console.print(
+                "[bold yellow]No known event patterns detected in the logs. "
+                "The cluster appears event-free — generating a clean health report.[/bold yellow]"
+            )
+        else:
+            console.print(
+                "[bold yellow]No known error patterns detected in the log files. "
+                "Exiting without generating a report.[/bold yellow]"
+            )
+            sys.exit(0)
+    else:
+        console.print(f"[green]Detected {len(errors)} event(s).[/green]")
 
     # ------------------------------------------------------------------
     # Step 2b — Extract ticket / kubectl command context
@@ -68,8 +84,30 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
         console.print(f"[dim]Extra context found: {found}[/dim]")
 
     # ------------------------------------------------------------------
-    # Step 3 — Build user context from CLI argument
+    # Health-check mode — separate pipeline
     # ------------------------------------------------------------------
+    if mode == "health-check":
+        console.print("\n[bold]Step 3: Analysing cluster health with Claude...[/bold]")
+        analysis = claude_analyst.analyze_health(errors, extra_context=extra_context)
+
+        console.print("\n[bold]Step 4: Generating health report...[/bold]")
+        output_path = rca_generator.generate_health_report(errors, analysis, logs_dir=logs_dir)
+
+        console.print(
+            Panel(
+                f"[bold green]Health report generated successfully![/bold green]\n\n"
+                f"[white]Output file:[/white] [cyan]{output_path}[/cyan]",
+                expand=False,
+                border_style="green",
+            )
+        )
+        return
+
+    # ------------------------------------------------------------------
+    # Incident RCA mode (original pipeline)
+    # ------------------------------------------------------------------
+
+    # Step 3 — Build user context from CLI argument
     console.print("\n[bold]Step 3: Building incident context...[/bold]")
     user_context = {
         "incident_time":     incident_time,
@@ -80,24 +118,15 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
     }
     console.print(f"[dim]Incident time: {incident_time}[/dim]")
 
-    # ------------------------------------------------------------------
     # Step 4 — Analyse with Claude
-    # ------------------------------------------------------------------
     console.print("\n[bold]Step 4: Analysing with Claude...[/bold]")
     analysis = claude_analyst.analyze_with_claude(errors, user_context, extra_context=extra_context)
 
-    # ------------------------------------------------------------------
     # Step 5 — Generate RCA document
-    # ------------------------------------------------------------------
     console.print("\n[bold]Step 5: Generating RCA document...[/bold]")
     output_path = rca_generator.generate_rca_document(errors, user_context, analysis)
 
-    # ------------------------------------------------------------------
-    # Done
-    # ------------------------------------------------------------------
-    # ------------------------------------------------------------------
     # Step 6 — Save to knowledge base
-    # ------------------------------------------------------------------
     console.print("\n[bold]Step 6: Saving incident to knowledge base...[/bold]")
     knowledge_base.save_incident(errors, user_context, analysis)
 
@@ -113,7 +142,24 @@ def main(logs_dir: str = _DEFAULT_LOGS_DIR, incident_time: str = "") -> None:
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="IFS RCA Agent")
+    parser = argparse.ArgumentParser(
+        description="IFS RCA Agent — Incident RCA or proactive Health Check",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Investigate a specific incident (requires --incident-time):
+  python -m src.main --mode incident --incident-time "2026-03-20 14:00 UTC"
+
+  # Proactive health check — just point at logs, no incident needed:
+  python -m src.main --mode health-check --logs-dir ./logs
+        """,
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["incident", "health-check"],
+        default="incident",
+        help="'incident' = RCA for a specific outage (default); 'health-check' = proactive cluster health assessment",
+    )
     parser.add_argument(
         "--logs-dir",
         default=_DEFAULT_LOGS_DIR,
@@ -121,8 +167,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--incident-time",
-        required=True,
-        help="Incident start date/time (e.g. '2026-03-20 14:00 UTC')",
+        default="",
+        help="Incident start date/time — required for 'incident' mode (e.g. '2026-03-20 14:00 UTC')",
     )
     args = parser.parse_args()
-    main(logs_dir=args.logs_dir, incident_time=args.incident_time)
+
+    if args.mode == "incident" and not args.incident_time:
+        parser.error("--incident-time is required when --mode is 'incident'")
+
+    main(logs_dir=args.logs_dir, incident_time=args.incident_time, mode=args.mode)

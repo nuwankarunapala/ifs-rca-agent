@@ -266,6 +266,122 @@ def _bold_run(cell) -> None:
             run.bold = True
 
 
+def generate_health_report(
+    errors: List[LogError],
+    analysis: str,
+    logs_dir: str = "",
+) -> str:
+    """
+    Generate a Word health report from Claude's 7-section health assessment.
+
+    Args:
+        errors:    All LogError objects detected in the logs.
+        analysis:  Claude's 7-section Markdown health report text.
+        logs_dir:  Path to the logs directory (shown on cover page).
+
+    Returns:
+        Absolute path of the saved .docx file (string).
+    """
+    output_dir = Path("output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(timezone.utc)
+    filename = f"HealthReport_{now.strftime('%Y%m%d_%H%M%S')}.docx"
+    output_path = output_dir / filename
+
+    doc = Document()
+    _set_default_font(doc)
+
+    _health_cover_page(doc, now, errors, logs_dir)
+
+    doc.add_page_break()
+    _health_event_summary(doc, errors)
+
+    doc.add_page_break()
+    _render_analysis(doc, analysis)
+
+    doc.save(output_path)
+    return str(output_path.resolve())
+
+
+def _health_cover_page(
+    doc: Document,
+    now: datetime,
+    errors: List[LogError],
+    logs_dir: str,
+) -> None:
+    title = doc.add_heading("Cluster Health Report", level=0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    subtitle = doc.add_paragraph("IFS / Kubernetes — Proactive Health Assessment")
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    doc.add_paragraph()
+
+    affected_pods = list({e.pod_name for e in errors if e.pod_name != "unknown"})
+    pod_list = ", ".join(sorted(affected_pods)[:10]) or "None detected"
+    if len(affected_pods) > 10:
+        pod_list += f" (+{len(affected_pods) - 10} more)"
+
+    by_type = Counter(e.error_type for e in errors)
+    top_issues = ", ".join(f"{t} ({c})" for t, c in by_type.most_common(5)) or "None"
+
+    meta = [
+        ("Report Generated",  now.strftime("%Y-%m-%d %H:%M:%S UTC")),
+        ("Analysis Type",     "Proactive Health Assessment"),
+        ("Logs Source",       logs_dir or "logs/"),
+        ("Total Events Found", str(len(errors))),
+        ("Unique Event Types", str(len(by_type))),
+        ("Top Issues",        top_issues),
+        ("Pods With Events",  pod_list),
+    ]
+
+    tbl = doc.add_table(rows=len(meta), cols=2)
+    tbl.style = "Table Grid"
+    for i, (label, value) in enumerate(meta):
+        cells = tbl.rows[i].cells
+        cells[0].text = label
+        _bold_run(cells[0])
+        cells[1].text = value
+
+
+def _health_event_summary(doc: Document, errors: List[LogError]) -> None:
+    doc.add_heading("Event Summary", level=1)
+
+    by_type = Counter(e.error_type for e in errors)
+    summary = doc.add_table(rows=1, cols=3)
+    summary.style = "Table Grid"
+    _header_row(summary.rows[0].cells, ["Event Type", "Count", "Severity"])
+
+    _sev_map: Dict[str, str] = {}
+    for e in errors:
+        if e.error_type not in _sev_map or e.severity < _sev_map[e.error_type]:
+            _sev_map[e.error_type] = e.severity
+
+    for etype, count in by_type.most_common():
+        row = summary.add_row().cells
+        row[0].text = etype
+        row[1].text = str(count)
+        row[2].text = _sev_map.get(etype, "")
+
+    doc.add_paragraph()
+
+    doc.add_paragraph().add_run("Detailed Event Log (first 50 entries)").bold = True
+    detail = doc.add_table(rows=1, cols=5)
+    detail.style = "Table Grid"
+    _header_row(
+        detail.rows[0].cells,
+        ["Timestamp", "Event Type", "Pod", "Source Type", "Source File"],
+    )
+    for err in errors[:50]:
+        row = detail.add_row().cells
+        row[0].text = err.timestamp
+        row[1].text = err.error_type
+        row[2].text = err.pod_name
+        row[3].text = err.file_type
+        row[4].text = err.source_file
+
+
 def _set_default_font(doc: Document) -> None:
     style = doc.styles["Normal"]
     font  = style.font
