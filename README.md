@@ -220,7 +220,7 @@ python -m src.main --help
 
 ### Health check pipeline
 
-1. Run `scripts/collect_health_data.sh` (or `.ps1`) to pull all 10 data areas from your cluster
+1. Run `scripts/collect_health_data.sh` (or `.ps1`) to pull all 15 data areas from your cluster
 2. The agent reads all files from the output directory (no time filtering — full picture)
 3. Detects known error/event patterns across all log types
 4. Sends structured data (top, get, describe, events, logs) to Claude Opus 4.6
@@ -251,31 +251,102 @@ Health check mode requires **no interactive prompts**. Run the data collection s
 
 #### Step 1 — Collect data from the cluster
 
+There are two collection methods. Use whichever fits your environment.
+
+---
+
+**Option A — `health_info.ps1` (recommended for Windows / IFS Cloud)**
+
+A comprehensive 25-section collection script. Outputs a single combined text file named `health_info_<namespace>_<timestamp>.txt`. The agent detects and reads this file automatically.
+
+```powershell
+# Copy health_info.ps1 to your working folder, then:
+.\health_info.ps1 -Namespace jehdev
+
+# Save the output file into the logs directory the agent will read:
+New-Item -ItemType Directory -Force -Path .\logs\health_check | Out-Null
+Move-Item health_info_*.txt .\logs\health_check\
+```
+
+Sections collected by `health_info.ps1`:
+
+| # | Section |
+|---|---------|
+| 1 | Cluster overview (nodes, version, namespaces, component status) |
+| 2 | Node resource utilisation — `kubectl top nodes` sorted by CPU and memory |
+| 3 | Pod utilisation — sorted by CPU and memory per namespace + cluster-wide |
+| 4 | Container-level utilisation — `--containers` shows linkerd-proxy / fluent-bit sidecar usage |
+| 5 | Resource requests and limits (incl. init containers, unbounded pod detection) |
+| 6 | Events — all + warnings per namespace + cluster-wide |
+| 7 | Linkerd control plane health — identity, destination, proxy-injector logs + cert check |
+| 8 | IFS services and endpoints — deployments, replicas, DaemonSets, ReplicaSets |
+| 9 | Ingress and network policies |
+| 10 | ConfigMaps |
+| 11 | Secrets (names and ages only — no values) |
+| 12 | CronJobs and Jobs including AOP background jobs |
+| 13 | Redis status — pod, logs, resource usage |
+| 14 | PVC and StorageClass status |
+| 15 | HPA — status + describe per HPA |
+| 16 | Scheduling constraints — affinity, topology spread, tolerations, nodeSelector per deployment |
+| 17 | Pod status summary — all pods, non-running, restart counts + waiting reason |
+| 18 | OOMKilled and CrashLoopBackOff detection — automated scan + previous container logs |
+| 19 | Certificate and TLS health — cert-manager certificates, issuers, ClusterIssuers |
+| 20 | ResourceQuota and LimitRange |
+| 21 | IFS application health — ifs-main, ifs-enums, MWS pods, image versions, not-ready pod describe |
+| 22 | StatefulSets — list + describe |
+| 23 | Node conditions and pressure — MemoryPressure, DiskPressure, PIDPressure, allocatable vs capacity |
+| 24 | API server and control plane — kube-system pods, metrics-server, APIService availability |
+| 25 | Rollout and deployment history — `rollout status --timeout=10s` + `rollout history` per deployment |
+
+> If `metrics-server` is not available, all `kubectl top` sections are skipped cleanly.
+
+---
+
+**Option B — `collect_health_data.sh` / `collect_health_data.ps1` (Bash / cross-platform)**
+
+Saves individual files per section into a directory (easier to inspect separately).
+
 **Bash (macOS / Linux):**
 ```bash
 chmod +x scripts/collect_health_data.sh
+
+# Single namespace
 ./scripts/collect_health_data.sh ifs-production ./logs/health_check
+
+# Two namespaces (e.g. production + staging)
+./scripts/collect_health_data.sh ifs-production ./logs/health_check ifs-staging
 ```
 
 **PowerShell (Windows):**
 ```powershell
+# Single namespace
 .\scripts\collect_health_data.ps1 -Namespace ifs-production -LogsDir .\logs\health_check
+
+# Two namespaces
+.\scripts\collect_health_data.ps1 -Namespace ifs-production -LogsDir .\logs\health_check -Namespace2 ifs-staging
 ```
 
-The script collects all 10 health areas and saves them into `logs/health_check/` using the file naming convention the agent expects:
+> If `metrics-server` is not installed the script skips all `kubectl top` sections cleanly without errors.
 
-| # | Area | Files collected |
-|---|------|----------------|
-| 1 | Node utilisation | `kubectl-top-nodes.txt`, `kubectl-describe-node-*.txt` |
-| 2 | Pod utilisation | `kubectl-top-pods-memory.txt`, `kubectl-top-pods-cpu.txt` |
+The script collects 15 health areas and saves them into the output directory using the file naming convention the agent expects:
+
+| # | Area | Key files collected |
+|---|------|-------------------|
+| 1 | Node utilisation | `kubectl-top-nodes-cpu/memory.txt`, `kubectl-describe-node-*.txt` |
+| 2 | Pod utilisation | top pods sorted by CPU + memory, `--containers` breakdown (shows linkerd-proxy/fluent-bit sidecar usage), cluster-wide `-A` |
 | 3 | Requests & limits | `kubectl-get-resource-requests.txt`, `kubectl-get-resourcequota.txt`, `kubectl-get-limitrange.txt` |
-| 4 | Events | `kubectl-events-all.txt`, `kubectl-events-warnings.txt` |
-| 5 | Linkerd health | `linkerd_logs/kubectl-linkerd-*.log`, `kubectl-linkerd-check.txt` |
-| 6 | Redis | `redis-<pod>.log` |
+| 4 | Events | `kubectl-events-all.txt`, `kubectl-events-warnings.txt` (both namespaces) |
+| 5 | Linkerd health | `linkerd_logs/kubectl-linkerd-*.log`, cert check |
+| 6 | Redis | `redis-<pod>.log` (auto-detects `app=redis` or `app.kubernetes.io/name=redis`) |
 | 7 | PVC / Storage | `kubectl-get-pvc.txt`, `kubectl-get-pv.txt`, `kubectl-get-storageclass.txt` |
 | 8 | HPA | `kubectl-get-hpa.txt`, `kubectl-describe-hpa-*.txt` |
-| 9 | Scheduling constraints | `kubectl-get-scheduling-constraints.txt`, `kubectl-get-node-taints.txt` |
-| 10 | Pod summary | `kubectl-get-pods-all.txt`, `kubectl-get-pods-nonrunning.txt`, `kubectl-get-pods-restarts.txt` |
+| 9 | Scheduling constraints | affinity + topology spread per deployment (JSON parsed — no PowerShell compat issues) |
+| 10 | Pod summary | all pods, non-running pods (namespace + cluster-wide), restart counts |
+| 11 | IFS application health | deployment image tags (confirms Helm upgrade), ifs-main/ifs-enums/MWS pods by label, describe not-ready pods |
+| 12 | StatefulSets | list + describe all StatefulSets in both namespaces |
+| 13 | Node conditions & pressure | `MemoryPressure`, `DiskPressure`, `PIDPressure` flagged as `ALERT`/`OK`, allocatable vs capacity CPU/memory/pods |
+| 14 | API server & control plane | kube-system pods + events, metrics-server health, APIService availability (catches broken API extensions) |
+| 15 | Rollout & deployment history | `rollout status --timeout=10s` + `rollout history` per deployment (confirms Helm upgrades rolled out cleanly) |
 
 #### Step 2 — Run the health check
 

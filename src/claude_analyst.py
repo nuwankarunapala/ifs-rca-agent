@@ -390,11 +390,20 @@ DEPLOYMENT ENVIRONMENT — read carefully before analysing:
 - Reference docs: https://docs.ifs.com/techdocs/25r2/ and https://community.ifs.com/
 
 You will receive a JSON payload that may include:
-  - events         : detected log error patterns
-  - kubectl_top    : kubectl top nodes / top pods output
-  - kubectl_get    : kubectl get pods, PVCs, HPAs, resource quotas, scheduling constraints
-  - kubectl_describe : kubectl describe node, HPA, deployment output
-  - kubectl_events : kubectl get events output
+  - events           : detected log error patterns
+  - kubectl_top      : kubectl top nodes / top pods (sorted by CPU and memory, --containers breakdown)
+  - kubectl_get      : kubectl get pods, PVCs, HPAs, resource quotas, scheduling constraints,
+                       StatefulSets, deployment images, IFS app pods, rollout status/history
+  - kubectl_describe : kubectl describe node, HPA, deployment, StatefulSet, not-ready pods
+  - kubectl_events   : kubectl get events (namespace + cluster-wide)
+  - health_report    : full combined report from health_info.ps1 covering all 25 sections:
+                       cluster overview, node utilisation, pod utilisation (incl. --containers
+                       sidecar breakdown), resource requests/limits, events, Linkerd health,
+                       IFS services/endpoints, ingress/network policies, ConfigMaps, Secrets,
+                       CronJobs/Jobs (incl. AOP), Redis, PVC/StorageClass, HPA, scheduling
+                       constraints, pod status, OOMKilled/CrashLoopBackOff detection, cert-manager
+                       TLS health, ResourceQuota/LimitRange, IFS app health (ifs-main/enums/MWS),
+                       StatefulSets, node conditions/pressure, API server health, rollout history
 
 Produce a HEALTH REPORT with EXACTLY these seven sections using the Markdown headings shown
 (the document generator depends on them):
@@ -641,20 +650,28 @@ def analyze_health(
     if extra_context.get("kubectl_describe"):
         payload["kubectl_describe"] = extra_context["kubectl_describe"]
         console.print("[dim]kubectl describe output found — included.[/dim]")
+    if extra_context.get("health_report"):
+        payload["health_report"] = extra_context["health_report"]
+        console.print("[dim]health_info report found (25-section combined report) — included.[/dim]")
 
     prompt_text = (
         "Please produce a full Cluster Health Report following the 7-section structure "
         "defined in the system prompt.\n\n"
         "Section 2 must list EVERY problem found with evidence.\n"
         "Section 3 must provide a copy-paste-ready fix for EVERY problem in Section 2.\n\n"
+        "If a 'health_report' field is present it is the full output of health_info.ps1 "
+        "covering 25 sections — treat it as the primary data source and analyse ALL sections "
+        "including OOMKilled detection, cert-manager TLS, CronJobs, Linkerd, node pressure, "
+        "API server health, rollout history, and IFS application pods.\n\n"
         "Source type key: container_log=kubectl-logs; linkerd_log=Linkerd sidecar; "
-        "kubectl_describe=kubectl describe output; kubectl_top=kubectl top; "
-        "kubectl_get=kubectl get; kubectl_events=kubectl get events.\n\n"
+        "kubectl_describe=kubectl describe; kubectl_top=kubectl top; "
+        "kubectl_get=kubectl get; kubectl_events=kubectl get events; "
+        "health_report=full health_info.ps1 output.\n\n"
         f"```json\n{json.dumps(payload, indent=2)}\n```"
     )
 
     console.print("\n[bold cyan]Analysing cluster health with Claude...[/bold cyan]")
-    result = _call_claude(client, _HEALTH_SYSTEM_PROMPT, prompt_text, max_tokens=4096)
+    result = _call_claude(client, _HEALTH_SYSTEM_PROMPT, prompt_text, max_tokens=8192)
 
     if not result:
         return "No health analysis returned."

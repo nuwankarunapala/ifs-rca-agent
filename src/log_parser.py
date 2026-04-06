@@ -336,6 +336,7 @@ def extract_context(raw_lines: List[Dict[str, str]]) -> Dict[str, str]:
         "kubectl_top":      [],
         "kubectl_get":      [],
         "kubectl_describe": [],
+        "health_report":    [],   # full combined output from health_info.ps1
     }
 
     for entry in raw_lines:
@@ -346,7 +347,9 @@ def extract_context(raw_lines: List[Dict[str, str]]) -> Dict[str, str]:
     result: Dict[str, str] = {}
     for key, lines in buckets.items():
         if lines:
-            result[key] = "\n".join(lines)[:4000]
+            # health_report is a large combined file — allow a bigger slice
+            cap = 12000 if key == "health_report" else 4000
+            result[key] = "\n".join(lines)[:cap]
 
     return result
 

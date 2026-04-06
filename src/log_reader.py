@@ -61,6 +61,8 @@ def _classify(relative_parts: tuple) -> str:
     parts_lower = [p.lower() for p in relative_parts]
 
     # Filename-prefix detection (highest priority)
+    if filename.startswith("health_info"):
+        return "health_report"        # full combined report from health_info.ps1
     if filename.startswith("ticket-") or filename.startswith("incident-"):
         return "ticket"
     if filename.startswith("kubectl-events"):
