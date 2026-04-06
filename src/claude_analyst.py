@@ -297,6 +297,42 @@ def _filter_errors_for_phase(errors: List[LogError], phase: str) -> List[LogErro
     return (filtered if filtered else errors)[:15]
 
 
+# ---------------------------------------------------------------------------
+# Shared priority tables — used by both analyze_with_claude and analyze_health
+# ---------------------------------------------------------------------------
+
+_PRIORITY = {
+    "Gate6_AntiAffinity": 1, "Gate8_TopologySpread": 1,
+    "Gate3_InsufficientResources": 1,
+    "Gate1_ResourceQuota": 2, "Gate2_LimitRange": 2, "Gate7_PVCPending": 2,
+    "Gate4_TaintToleration": 3, "Gate5_AffinityMismatch": 3,
+    "CrashLoopBackOff": 2, "OOMKilled": 2, "NodeNotReady": 2, "Evicted": 2,
+    "ImagePullError": 3, "LivenessFail": 3, "ReadinessFail": 3, "ConnectionError": 3,
+    "PodRestart": 4, "Exception": 4, "BackOff": 4,
+    "IFSError": 4, "LinkerdError": 4, "IngressError": 4, "ScalingError": 4,
+}
+
+_SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
+
+
+def _pod_score(pod: str) -> int:
+    """Lower score = higher priority. ifsapp-odata is always first."""
+    p = pod.lower()
+    if "odata" in p:               return 0   # ifsapp-odata       ★ highest
+    if "iam" in p:                 return 1   # ifsapp-iam
+    if "client-services" in p:     return 2   # ifsapp-client-services
+    if "proxy" in p:               return 3   # ifsapp-proxy
+    if "client-notification" in p: return 4   # ifsapp-client-notification
+    if "client" in p:              return 5   # ifsapp-client
+    if "connect" in p:             return 6   # ifsapp-connect
+    if "application-svc" in p:     return 7   # ifsapp-application-svc
+    if "db-init" in p:             return 8   # ifs-db-init
+    if "docman" in p or "esign" in p: return 9
+    if "doc" in p:                 return 10
+    if "reporting" in p or "crystal" in p: return 11
+    return 99
+
+
 def _call_claude(client, system: str, user: str, max_tokens: int = 2048) -> str:
     resp = client.messages.create(
         model="claude-opus-4-6",
@@ -534,21 +570,14 @@ def analyze_health(
     client = anthropic.Anthropic(api_key=api_key)
 
     # Sample errors — guarantee one per type, up to 25 total
-    _PRIORITY = {
-        "Gate6_AntiAffinity": 1, "Gate8_TopologySpread": 1,
-        "Gate3_InsufficientResources": 1,
-        "Gate1_ResourceQuota": 2, "Gate2_LimitRange": 2, "Gate7_PVCPending": 2,
-        "Gate4_TaintToleration": 3, "Gate5_AffinityMismatch": 3,
-        "CrashLoopBackOff": 2, "OOMKilled": 2, "NodeNotReady": 2, "Evicted": 2,
-        "ImagePullError": 3, "LivenessFail": 3, "ReadinessFail": 3, "ConnectionError": 3,
-        "PodRestart": 4, "Exception": 4, "BackOff": 4,
-        "IFSError": 4, "LinkerdError": 4, "IngressError": 4, "ScalingError": 4,
-    }
-    _SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
-
+    # Same pod priority as RCA: ifsapp-odata first, then iam, client-services, etc.
     sorted_errors = sorted(
         errors,
-        key=lambda e: (_PRIORITY.get(e.error_type, 9), _SEV_ORDER.get(e.severity, 9)),
+        key=lambda e: (
+            _PRIORITY.get(e.error_type, 9),
+            _pod_score(e.pod_name),
+            _SEV_ORDER.get(e.severity, 9),
+        ),
     )
 
     sampled: List[LogError] = []
@@ -666,41 +695,7 @@ def analyze_with_claude(
 
     client = anthropic.Anthropic(api_key=api_key)
 
-    # Error type priority — lower = more important
-    _PRIORITY = {
-        # Scheduling gates — on MicroK8s single-node, Gate6 and Gate8 are most common
-        "Gate6_AntiAffinity": 1, "Gate8_TopologySpread": 1,       # ★ single-node HA issue
-        "Gate3_InsufficientResources": 1,                          # single node runs out fast
-        "Gate1_ResourceQuota": 2, "Gate2_LimitRange": 2,
-        "Gate7_PVCPending": 2,
-        "Gate4_TaintToleration": 3, "Gate5_AffinityMismatch": 3,
-        # Critical runtime failures
-        "CrashLoopBackOff": 2, "OOMKilled": 2, "NodeNotReady": 2, "Evicted": 2,
-        # Probe / image / connectivity
-        "ImagePullError": 3, "LivenessFail": 3, "ReadinessFail": 3, "ConnectionError": 3,
-        # Lower signal
-        "PodRestart": 4, "Exception": 4, "BackOff": 4,
-        "IFSError": 4, "LinkerdError": 4, "IngressError": 4, "ScalingError": 4,
-    }
-    _SEV_ORDER = {"CRITICAL": 0, "ERROR": 1, "WARNING": 2, "INFO": 3}
-
-    # Pod priority — lower = more important
-    def _pod_score(pod: str) -> int:
-        p = pod.lower()
-        if "odata" in p:                            return 0  # ifsapp-odata
-        if "iam" in p:                              return 1  # ifsapp-iam
-        if "client-services" in p:                  return 2  # ifsapp-client-services
-        if "proxy" in p:                            return 3  # ifsapp-proxy
-        if "client-notification" in p:              return 4  # ifsapp-client-notification
-        if "client" in p:                           return 5  # ifsapp-client
-        if "connect" in p:                          return 6  # ifsapp-connect
-        if "application-svc" in p:                  return 7  # ifsapp-application-svc
-        if "db-init" in p:                          return 8  # ifs-db-init
-        if "docman" in p or "esign" in p:           return 9  # ifsapp-docman-esign
-        if "doc" in p:                              return 10 # ifsapp-doc
-        if "reporting" in p or "crystal" in p:      return 11 # ifsapp-reporting-*
-        return 99  # anything else (should be filtered out already)
-
+    # Uses module-level _PRIORITY, _SEV_ORDER, _pod_score — same as analyze_health
     sorted_errors = sorted(
         errors,
         key=lambda e: (

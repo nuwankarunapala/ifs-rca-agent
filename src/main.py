@@ -55,8 +55,10 @@ def main(
     console.print("\n[bold]Step 2: Parsing errors from logs...[/bold]")
 
     if mode == "health-check":
-        # No time filtering — analyse all events in the logs
-        errors = log_parser.parse_errors(raw_lines, incident_time="", window_hours=0)
+        # Filter to the last 7 days — gives a rolling week view without noise from old data
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        errors = log_parser.parse_errors(raw_lines, incident_time=now_utc, window_hours=168)
     else:
         errors = log_parser.parse_errors(raw_lines, incident_time=incident_time, window_hours=48)
 
