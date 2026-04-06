@@ -1,6 +1,6 @@
-# IFS RCA Agent
+# IFS Kube Medic
 
-An AI-powered Root Cause Analysis tool that reads Kubernetes log files, detects error patterns, asks you a few questions about the incident, sends everything to Claude Opus 4.6 for analysis, and produces a formatted Word document report — all from a single command.
+An AI-powered Root Cause Analysis and Kubernetes health check tool that reads log files, detects error patterns, asks you a few questions about the incident, sends everything to Claude Opus 4.6 for analysis, and produces a formatted Word document report — all from a single command.
 
 ---
 
@@ -16,8 +16,8 @@ An AI-powered Root Cause Analysis tool that reads Kubernetes log files, detects 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/your-org/ifs-rca-agent.git
-cd ifs-rca-agent
+git clone https://github.com/your-org/ifs_kube_medic.git
+cd ifs_kube_medic
 ```
 
 ### 2. Create a virtual environment
@@ -102,7 +102,7 @@ output/RCA_20260320_140522.docx
 ## Project Structure
 
 ```
-ifs-rca-agent/
+ifs_kube_medic/
 ├── logs/                    ← Place your log files here
 ├── output/                  ← Generated RCA reports appear here
 ├── src/
