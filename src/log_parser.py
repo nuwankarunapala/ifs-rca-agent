@@ -322,18 +322,20 @@ def extract_context(raw_lines: List[Dict[str, str]]) -> Dict[str, str]:
 
         ticket / incident files  → free-text incident communications
         kubectl-events files     → cluster event output
-        kubectl-top files        → resource usage snapshot
-        kubectl-get files        → pod/resource listing
+        kubectl-top files        → resource usage snapshot (node & pod utilisation)
+        kubectl-get files        → pod/resource listing (requests, limits, PVCs, HPAs, pods)
+        kubectl-describe files   → full describe output (nodes, HPAs, scheduling constraints)
 
-    Returns a dict with keys: ticket, kubectl_events, kubectl_top, kubectl_get.
-    Each value is the concatenated text content (capped at 3000 chars each).
+    Returns a dict with keys: ticket, kubectl_events, kubectl_top, kubectl_get, kubectl_describe.
+    Each value is the concatenated text content (capped at 4000 chars each).
     Only populated keys are included.
     """
     buckets: Dict[str, list] = {
-        "ticket":        [],
-        "kubectl_events": [],
-        "kubectl_top":   [],
-        "kubectl_get":   [],
+        "ticket":           [],
+        "kubectl_events":   [],
+        "kubectl_top":      [],
+        "kubectl_get":      [],
+        "kubectl_describe": [],
     }
 
     for entry in raw_lines:
@@ -344,7 +346,7 @@ def extract_context(raw_lines: List[Dict[str, str]]) -> Dict[str, str]:
     result: Dict[str, str] = {}
     for key, lines in buckets.items():
         if lines:
-            result[key] = "\n".join(lines)[:3000]
+            result[key] = "\n".join(lines)[:4000]
 
     return result
 

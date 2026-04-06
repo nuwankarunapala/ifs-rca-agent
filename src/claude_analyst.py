@@ -353,51 +353,85 @@ DEPLOYMENT ENVIRONMENT — read carefully before analysing:
 - Resource exhaustion is a constant risk on a single node shared by all IFS pods.
 - Reference docs: https://docs.ifs.com/techdocs/25r2/ and https://community.ifs.com/
 
-You will receive a JSON payload with detected log events and error patterns.
+You will receive a JSON payload that may include:
+  - events         : detected log error patterns
+  - kubectl_top    : kubectl top nodes / top pods output
+  - kubectl_get    : kubectl get pods, PVCs, HPAs, resource quotas, scheduling constraints
+  - kubectl_describe : kubectl describe node, HPA, deployment output
+  - kubectl_events : kubectl get events output
+
 Produce a HEALTH REPORT with EXACTLY these seven sections using the Markdown headings shown
 (the document generator depends on them):
 
 ## 1. Cluster Health Overview
 Overall cluster status: Healthy / Warning / Critical.
-2-3 sentence summary of what the logs reveal about current cluster state.
-Health score table per subsystem: Scheduling | Resources | Networking | Application | Storage
-(each scored: Healthy / Warning / Critical / Unknown)
+2-3 sentence summary of what the data reveals about current cluster state.
+Health score table per area:
 
-## 2. Risk Assessment
-Table with columns: Risk | Severity | Component | Evidence | Likelihood
-Severity: P1 (imminent failure), P2 (degradation within days), P3 (long-term concern).
-Include ALL identified risks, ordered P1 → P2 → P3.
+| Area | Status | Summary |
+|------|--------|---------|
+| Node Utilisation | Healthy/Warning/Critical | one-line finding |
+| Pod Utilisation | Healthy/Warning/Critical | one-line finding |
+| Requests & Limits | Healthy/Warning/Critical | one-line finding |
+| Events | Healthy/Warning/Critical | one-line finding |
+| Linkerd / Service Mesh | Healthy/Warning/Critical/Unknown | one-line finding |
+| Redis | Healthy/Warning/Critical/Unknown | one-line finding |
+| PVC / Storage | Healthy/Warning/Critical/Unknown | one-line finding |
+| HPA / Autoscaling | Healthy/Warning/Critical/Unknown | one-line finding |
+| Scheduling Constraints | Healthy/Warning/Critical | one-line finding |
+| Pod Summary | Healthy/Warning/Critical | one-line finding |
 
-## 3. Resource & Capacity Analysis
-- CPU and memory pressure indicators from logs
-- Pods approaching or exceeding resource limits
-- ResourceQuota / LimitRange utilisation
-- Capacity headroom assessment for the single node
-- HPA / autoscaler behaviour observations
+## 2. Problems Found
+List EVERY identified problem clearly. For each problem:
+- **[SEVERITY] Problem title** — one-line description
+  - Evidence: quote the specific metric, pod name, or log line that proves the problem
+  - Impact: what breaks or degrades if this is not fixed
 
-## 4. Service Health Status
-Per-component health table: Component | Status | Observations
-Components: ifsapp-odata, ifsapp-iam, ifsapp-client, ifsapp-proxy, ifsapp-connect,
-            ifsapp-reporting, ifsapp-docman, ifsapp-application-svc, ifs-db-init
-Status options: Healthy | Degraded | At Risk | Unknown (no data)
+Severity levels: CRITICAL (service down/imminent), WARNING (degradation likely), INFO (hygiene).
+Order: CRITICAL first, then WARNING, then INFO.
+If no problems are found in an area, state "No issues detected."
 
-## 5. Configuration & Scheduling Concerns
-- Anti-affinity / topology spread issues specific to MicroK8s single-node
-- PVC / StorageClass concerns
-- Missing or low resource requests/limits in pod specs
-- Any detected misconfigurations (NetworkPolicy, Ingress, Linkerd)
+## 3. How to Fix — Step-by-Step Resolutions
+For EVERY problem listed in Section 2, provide a numbered resolution block:
+
+### Fix N: [Problem title from Section 2]
+**Root cause:** one sentence
+**Steps:**
+1. Exact kubectl command or config change (copy-paste ready)
+2. Next step
+3. Verify with: `kubectl command to confirm fix worked`
+**Expected outcome:** what should be true after the fix
+**Risk if skipped:** what happens if left unfixed
+
+## 4. Resource & Capacity Analysis
+- Node CPU and memory: current usage vs allocatable (from kubectl_top / describe node)
+- Pods closest to their memory/CPU limits (list top 5 by utilisation %)
+- ResourceQuota consumed vs total (exact numbers if available)
+- HPA current replicas vs min/max, and whether autoscaling is healthy
+- Capacity headroom: can the node absorb a pod restart or traffic spike?
+
+## 5. Service Health Status
+Per-component health table: Component | Status | Key Observations
+Components to cover: ifsapp-odata, ifsapp-iam, ifsapp-client, ifsapp-proxy, ifsapp-connect,
+ifsapp-reporting, ifsapp-docman, ifsapp-application-svc, ifs-db-init, Redis, Linkerd
+Status: Healthy | Degraded | At Risk | Critical | Unknown (no data)
 
 ## 6. Missing Information
-What additional data would improve this health assessment?
-Table with columns: Missing Data | Why It Matters | How to Collect (kubectl command)
-Be specific — list actual kubectl commands the engineer should run.
+Data that was NOT available in this assessment but would improve accuracy:
 
-## 7. Recommendations
-Table with columns: Action | Priority | Component | Expected Benefit
-Order by priority P1 first. Include only actionable items with clear owners.
+| Missing Data | Why It Matters | Collect With |
+|--------------|----------------|--------------|
+| ... | ... | `kubectl command` |
 
-Be evidence-based. Reference specific pod names, error counts, and timestamps from the data.
-If the logs show no errors, state that explicitly and assess capacity and config risks instead."""
+## 7. Priority Action List
+Consolidated list of all actions from Section 3, ordered by urgency:
+
+| Priority | Action | Component | Effort | Risk if Skipped |
+|----------|--------|-----------|--------|-----------------|
+| P1 | ... | ... | Low/Med/High | ... |
+
+Be evidence-based. Reference specific pod names, exact numbers, and timestamps from the data.
+If a data source (e.g. kubectl_top) was not provided, note it as Unknown and explain what to run."""
 
 
 _MOCK_HEALTH_RESPONSE = """\
@@ -575,13 +609,18 @@ def analyze_health(
     if extra_context.get("kubectl_get"):
         payload["kubectl_get"] = extra_context["kubectl_get"]
         console.print("[dim]kubectl get output found — included.[/dim]")
+    if extra_context.get("kubectl_describe"):
+        payload["kubectl_describe"] = extra_context["kubectl_describe"]
+        console.print("[dim]kubectl describe output found — included.[/dim]")
 
     prompt_text = (
         "Please produce a full Cluster Health Report following the 7-section structure "
-        "defined in the system prompt. Assess current health, identify all risks, and "
-        "clearly state what additional information is needed.\n\n"
+        "defined in the system prompt.\n\n"
+        "Section 2 must list EVERY problem found with evidence.\n"
+        "Section 3 must provide a copy-paste-ready fix for EVERY problem in Section 2.\n\n"
         "Source type key: container_log=kubectl-logs; linkerd_log=Linkerd sidecar; "
-        "kubectl_describe=kubectl describe output; other=miscellaneous.\n\n"
+        "kubectl_describe=kubectl describe output; kubectl_top=kubectl top; "
+        "kubectl_get=kubectl get; kubectl_events=kubectl get events.\n\n"
         f"```json\n{json.dumps(payload, indent=2)}\n```"
     )
 
